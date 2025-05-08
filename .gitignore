@@ -1,0 +1,14 @@
+# Root level .gitignore
+
+# VS Code files at root level
+/.vscode/
+# But keep these specific VS Code files
+!/.vscode/settings.json
+!/.vscode/tasks.json
+!/.vscode/launch.json
+!/.vscode/extensions.json
+
+# Other common files to ignore at root level
+.DS_Store
+*.log
+node_modules/
