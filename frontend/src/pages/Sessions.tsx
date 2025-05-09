@@ -104,8 +104,9 @@ const Sessions: React.FC = () => {
           <TabList>
             <Tab>All Sessions</Tab>
             <Tab>Upcoming</Tab>
-            <Tab>Completed</Tab>
+            
             <Tab>In Progress</Tab>
+            <Tab>Completed</Tab>
           </TabList>
           <TabPanels>
             {/* All Sessions Tab */}
@@ -126,21 +127,21 @@ const Sessions: React.FC = () => {
               />
             </TabPanel>
             
-            {/* Completed Sessions Tab */}
-            <TabPanel px={0} pt={4}>
-              <SessionList 
-                onViewSession={handleViewSession} 
-                onEditSession={handleEditSession} 
-                filterStatus={SessionStatus.COMPLETED}
-              />
-            </TabPanel>
-            
             {/* In Progress Sessions Tab */}
             <TabPanel px={0} pt={4}>
               <SessionList 
                 onViewSession={handleViewSession} 
                 onEditSession={handleEditSession} 
                 filterStatus={SessionStatus.IN_PROGRESS}
+              />
+            </TabPanel>
+
+            {/* Completed Sessions Tab */}
+            <TabPanel px={0} pt={4}>
+              <SessionList 
+                onViewSession={handleViewSession} 
+                onEditSession={handleEditSession} 
+                filterStatus={SessionStatus.COMPLETED}
               />
             </TabPanel>
           </TabPanels>
