@@ -76,8 +76,11 @@ public class SessionService {
      * @return the created session DTO
      */
     public SessionDto createSession(SessionDto sessionDto) {
-        User user = userRepository.findById(sessionDto.getUserId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        User user = getCurrentUser();
+        if (user == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, 
+                    "No authenticated user found and no user ID provided");
+        }
 
         Session session = new Session();
         session.setPatientName(sessionDto.getPatientName());
