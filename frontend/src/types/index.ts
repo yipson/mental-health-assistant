@@ -55,6 +55,11 @@ export interface RecordingData {
   duration: number; // in seconds
 }
 
+export interface RecordingChunk {
+  blob: Blob;
+  timestamp: number; // in milliseconds
+}
+
 // Calendar Types
 export interface CalendarEvent {
   id: string;
