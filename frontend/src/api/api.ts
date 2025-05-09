@@ -54,9 +54,23 @@ export const sessionsApi = {
       }
       
       // No need to send userId as it will be retrieved from the authenticated user on the backend
+      // Create a date string that preserves the exact time selected by the user
+      const date = sessionData.date;
+      // Format date as ISO string but preserve the local time components
+      const formattedDate = new Date(
+        Date.UTC(
+          date.getFullYear(),
+          date.getMonth(),
+          date.getDate(),
+          date.getHours(),
+          date.getMinutes(),
+          date.getSeconds()
+        )
+      ).toISOString();
+      
       const response = await axiosInstance.post('/sessions', {
         patientName: sessionData.patientName,
-        date: sessionData.date,
+        date: formattedDate, // Send formatted date to preserve local time
         duration: sessionData.duration,
         status: mapSessionStatus(sessionData.status),
         notes: sessionData.notes || ''
