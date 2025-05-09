@@ -47,19 +47,19 @@ export const sessionsApi = {
       }
       
       // Real API implementation
-      // Get the current user ID from auth service
+      // Check if user is authenticated
       const currentUser = authService.getCurrentUser();
       if (!currentUser) {
         throw new Error('User not authenticated');
       }
       
+      // No need to send userId as it will be retrieved from the authenticated user on the backend
       const response = await axiosInstance.post('/sessions', {
         patientName: sessionData.patientName,
         date: sessionData.date,
         duration: sessionData.duration,
         status: mapSessionStatus(sessionData.status),
-        notes: sessionData.notes || '',
-        userId: currentUser.id
+        notes: sessionData.notes || ''
       });
       
       return { data: mapSessionFromBackend(response.data), success: true };
