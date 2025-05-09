@@ -19,6 +19,7 @@ import { sessionsApi } from '../../api/api';
 interface SessionListProps {
   onViewSession?: (session: Session) => void;
   onEditSession?: (session: Session) => void;
+  filterStatus?: SessionStatus | null; // Add filter by status
 }
 
 type SortField = 'patientName' | 'date' | 'status';
@@ -26,7 +27,8 @@ type SortDirection = 'asc' | 'desc';
 
 const SessionList: React.FC<SessionListProps> = ({ 
   onViewSession, 
-  onEditSession 
+  onEditSession,
+  filterStatus = null
 }) => {
   const { sessions, deleteSession } = useSessionStore();
   const [searchTerm, setSearchTerm] = useState('');
@@ -80,9 +82,15 @@ const SessionList: React.FC<SessionListProps> = ({
     }
   };
 
-  const filteredSessions = sessions.filter(session => 
-    session.patientName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredSessions = sessions.filter(session => {
+    // Apply name search filter
+    const matchesSearch = session.patientName.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // Apply status filter if provided
+    const matchesStatus = filterStatus === null || session.status === filterStatus;
+    
+    return matchesSearch && matchesStatus;
+  });
 
   const sortedSessions = [...filteredSessions].sort((a, b) => {
     if (sortField === 'patientName') {

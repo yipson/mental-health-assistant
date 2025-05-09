@@ -24,7 +24,7 @@ import { FaPlus } from 'react-icons/fa';
 import { Link, useNavigate } from 'react-router-dom';
 import useSessionStore from '../store/sessionStore';
 import { sessionsApi } from '../api/api';
-import { Session } from '../types';
+import { Session, SessionStatus } from '../types';
 import SessionList from '../components/session/SessionList';
 import SessionForm from '../components/session/SessionForm';
 
@@ -108,28 +108,39 @@ const Sessions: React.FC = () => {
             <Tab>In Progress</Tab>
           </TabList>
           <TabPanels>
+            {/* All Sessions Tab */}
             <TabPanel px={0} pt={4}>
               <SessionList 
                 onViewSession={handleViewSession} 
                 onEditSession={handleEditSession} 
+                filterStatus={null} // No filter for all sessions
               />
             </TabPanel>
+            
+            {/* Upcoming (Scheduled) Sessions Tab */}
             <TabPanel px={0} pt={4}>
               <SessionList 
                 onViewSession={handleViewSession} 
                 onEditSession={handleEditSession} 
+                filterStatus={SessionStatus.SCHEDULED}
               />
             </TabPanel>
+            
+            {/* Completed Sessions Tab */}
             <TabPanel px={0} pt={4}>
               <SessionList 
                 onViewSession={handleViewSession} 
                 onEditSession={handleEditSession} 
+                filterStatus={SessionStatus.COMPLETED}
               />
             </TabPanel>
+            
+            {/* In Progress Sessions Tab */}
             <TabPanel px={0} pt={4}>
               <SessionList 
                 onViewSession={handleViewSession} 
                 onEditSession={handleEditSession} 
+                filterStatus={SessionStatus.IN_PROGRESS}
               />
             </TabPanel>
           </TabPanels>
