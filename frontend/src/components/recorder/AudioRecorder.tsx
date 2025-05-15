@@ -27,7 +27,7 @@ import {
   FaForward,
 } from "react-icons/fa";
 import WaveformDisplay from "./WaveformDisplay";
-import { transcriptionApi } from "../../api/api";
+import { transcriptionApi, audioApi } from "../../api/api";
 
 interface AudioRecorderProps {
   sessionId: string;
@@ -89,6 +89,16 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
       stopRecording();
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
+      }
+    };
+  }, []);
+
+  // Cleanup audio player on unmount
+  useEffect(() => {
+    return () => {
+      if (audioPlayer.current) {
+        audioPlayer.current.pause();
+        audioPlayer.current = null;
       }
     };
   }, []);
@@ -180,10 +190,6 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
       });
     }
   };
-
-
-
-
 
   const handleStopRecording = () => {
     setShowStopConfirm(true);
@@ -312,27 +318,100 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
       .padStart(2, "0")}`;
   };
 
-  // Cleanup audio player on unmount
-  useEffect(() => {
-    return () => {
-      if (audioPlayer.current) {
-        audioPlayer.current.pause();
-        audioPlayer.current = null;
-      }
-    };
-  }, []);
+
+
+
+
+
+
+
+
+
 
   const handleForward = () => {
     if (audioPlayer.current) {
-      audioPlayer.current.currentTime += 10; // Adelanta 10 segundos
+      audioPlayer.current.currentTime += 10;
     }
   };
 
   const handleBackward = () => {
     if (audioPlayer.current) {
-      audioPlayer.current.currentTime -= 10; // Retrocede 10 segundos
+      audioPlayer.current.currentTime -= 10;
     }
   };
+
+  const handleAudioUpload = async (audioBlob: Blob, duration: number) => {
+    try {
+      const metadata = {
+        fileName: `session_${sessionId}_${Date.now()}.webm`,
+        mimeType: audioBlob.type,
+        duration: duration,
+        size: audioBlob.size,
+        dateRecorded: new Date().toISOString(),
+        sampleRate: mediaRecorder.current?.audioBitsPerSecond || 44100,
+        channels: 2,
+        bitRate: mediaRecorder.current?.audioBitsPerSecond || 128000,
+      };
+
+      const response = await audioApi.uploadAudio(
+        sessionId,
+        audioBlob,
+        metadata
+      );
+
+      if (response.success && response.data) {
+        if (onRecordingComplete) {
+          onRecordingComplete(response.data);
+        }
+
+        toast({
+          title: "Audio uploaded successfully",
+          status: "success",
+          duration: 2000,
+          isClosable: true,
+        });
+      } else {
+        throw new Error(response.error || "Failed to upload audio");
+      }
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
+
+  // Modify the mediaRecorder.onstop handler
+  if (mediaRecorder.current) {
+    mediaRecorder.current.onstop = () => {
+      if (audioChunks.current.length > 0) {
+        const audioBlob = new Blob(audioChunks.current, {
+          type: "audio/webm",
+        });
+        const audioUrl = URL.createObjectURL(audioBlob);
+
+        const newRecordingData = {
+          blob: audioBlob,
+          url: audioUrl,
+          duration: recordingTime,
+        };
+
+        setRecordingData(newRecordingData);
+
+        // Call handleAudioUpload with the blob and duration
+        handleAudioUpload(audioBlob, recordingTime);
+      }
+
+      // Clean up
+      if (stream.current) {
+        stream.current.getTracks().forEach((track) => track.stop());
+        stream.current = null;
+      }
+    };
+  }
 
   return (
     <Box
@@ -349,82 +428,10 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
           <Flex justify="space-between" align="center" mb={4}>
             <Text fontSize="xl" fontWeight="bold">
               Session Recorder
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
             </Text>
 
             {isRecording && (
               <Badge
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
                 colorScheme="red"
                 fontSize="md"
                 px={2}
@@ -490,11 +497,11 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
         </Box>
 
         {/* Sección de Controles */}
-        <Box 
-          borderTop="2px" 
-          borderColor="gray.200" 
-          pt={4}
-        >
+        <Box borderTop="2px" borderColor="gray.200" pt={4}>
+
+
+
+
           {/* Recording controls */}
           <HStack spacing={4} justify="center" mb={4}>
             {!isRecording && !recordingData && (
@@ -543,7 +550,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
                   colorScheme="blue"
                   onClick={handlePlayPause}
                 >
-                  {isPlaying ? 'Pause' : 'Play'}
+                  {isPlaying ? "Pause" : "Play"}
                 </Button>
               </Tooltip>
 

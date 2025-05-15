@@ -1,7 +1,14 @@
-import { ApiResponse, Session, Transcription, Summary, SessionStatus } from '../types';
-import { mockApi } from './mockApi';
-import axiosInstance from './axiosConfig';
-import authService from './authService';
+import {
+  ApiResponse,
+  Session,
+  Transcription,
+  Summary,
+  SessionStatus,
+  AudioMetadata,
+} from "../types";
+import { mockApi } from "./mockApi";
+import axiosInstance from "./axiosConfig";
+import authService from "./authService";
 
 // Set to false to use real API
 const USE_MOCK_API = false;
@@ -14,45 +21,53 @@ export const sessionsApi = {
         const data = await mockApi.getAllSessions();
         return { data, success: true };
       }
-      
+
       // Real API implementation
-      const response = await axiosInstance.get('/sessions');
+      const response = await axiosInstance.get("/sessions");
       const sessions = response.data.map(mapSessionFromBackend);
       return { data: sessions, success: true };
     } catch (error: any) {
-      return { error: error.response?.data?.message || error.message, success: false };
+      return {
+        error: error.response?.data?.message || error.message,
+        success: false,
+      };
     }
   },
-  
+
   getSessionById: async (id: string): Promise<ApiResponse<Session>> => {
     try {
       if (USE_MOCK_API) {
         const data = await mockApi.getSessionById(id);
         return { data, success: true };
       }
-      
+
       // Real API implementation
       const response = await axiosInstance.get(`/sessions/${id}`);
       return { data: mapSessionFromBackend(response.data), success: true };
     } catch (error: any) {
-      return { error: error.response?.data?.message || error.message, success: false };
+      return {
+        error: error.response?.data?.message || error.message,
+        success: false,
+      };
     }
   },
-  
-  createSession: async (sessionData: Omit<Session, 'id'>): Promise<ApiResponse<Session>> => {
+
+  createSession: async (
+    sessionData: Omit<Session, "id">
+  ): Promise<ApiResponse<Session>> => {
     try {
       if (USE_MOCK_API) {
         const data = await mockApi.createSession(sessionData);
         return { data, success: true };
       }
-      
+
       // Real API implementation
       // Check if user is authenticated
       const currentUser = authService.getCurrentUser();
       if (!currentUser) {
-        throw new Error('User not authenticated');
+        throw new Error("User not authenticated");
       }
-      
+
       // No need to send userId as it will be retrieved from the authenticated user on the backend
       // Create a date string that preserves the exact time selected by the user
       const date = sessionData.date;
@@ -67,58 +82,73 @@ export const sessionsApi = {
           date.getSeconds()
         )
       ).toISOString();
-      
-      const response = await axiosInstance.post('/sessions', {
+
+      const response = await axiosInstance.post("/sessions", {
         patientName: sessionData.patientName,
         date: formattedDate, // Send formatted date to preserve local time
         duration: sessionData.duration,
         status: mapSessionStatus(sessionData.status),
-        notes: sessionData.notes || ''
+        notes: sessionData.notes || "",
       });
-      
+
       return { data: mapSessionFromBackend(response.data), success: true };
     } catch (error: any) {
-      return { error: error.response?.data?.message || error.message, success: false };
+      return {
+        error: error.response?.data?.message || error.message,
+        success: false,
+      };
     }
   },
-  
-  updateSession: async (id: string, sessionData: Partial<Session>): Promise<ApiResponse<Session>> => {
+
+  updateSession: async (
+    id: string,
+    sessionData: Partial<Session>
+  ): Promise<ApiResponse<Session>> => {
     try {
       if (USE_MOCK_API) {
         const data = await mockApi.updateSession(id, sessionData);
         return { data, success: true };
       }
-      
+
       // Real API implementation
       const backendData: any = {};
-      
-      if (sessionData.patientName) backendData.patientName = sessionData.patientName;
+
+      if (sessionData.patientName)
+        backendData.patientName = sessionData.patientName;
       if (sessionData.date) backendData.date = sessionData.date;
       if (sessionData.duration) backendData.duration = sessionData.duration;
-      if (sessionData.status) backendData.status = mapSessionStatus(sessionData.status);
-      if (sessionData.notes !== undefined) backendData.notes = sessionData.notes;
-      
+      if (sessionData.status)
+        backendData.status = mapSessionStatus(sessionData.status);
+      if (sessionData.notes !== undefined)
+        backendData.notes = sessionData.notes;
+
       const response = await axiosInstance.put(`/sessions/${id}`, backendData);
       return { data: mapSessionFromBackend(response.data), success: true };
     } catch (error: any) {
-      return { error: error.response?.data?.message || error.message, success: false };
+      return {
+        error: error.response?.data?.message || error.message,
+        success: false,
+      };
     }
   },
-  
+
   deleteSession: async (id: string): Promise<ApiResponse<void>> => {
     try {
       if (USE_MOCK_API) {
         await mockApi.deleteSession(id);
         return { success: true };
       }
-      
+
       // Real API implementation
       await axiosInstance.delete(`/sessions/${id}`);
       return { success: true };
     } catch (error: any) {
-      return { error: error.response?.data?.message || error.message, success: false };
+      return {
+        error: error.response?.data?.message || error.message,
+        success: false,
+      };
     }
-  }
+  },
 };
 
 // Transcription API
@@ -129,27 +159,30 @@ export const transcriptionApi = {
         const data = await mockApi.getTranscription(id);
         return { data, success: true };
       }
-      
+
       // Real API implementation would go here
-      throw new Error('Real API not implemented yet');
+      throw new Error("Real API not implemented yet");
     } catch (error: any) {
       return { error: error.message, success: false };
     }
   },
-  
-  createTranscription: async (sessionId: string, audioBlob: Blob): Promise<ApiResponse<Transcription>> => {
+
+  createTranscription: async (
+    sessionId: string,
+    audioBlob: Blob
+  ): Promise<ApiResponse<Transcription>> => {
     try {
       if (USE_MOCK_API) {
         const data = await mockApi.createTranscription(sessionId, audioBlob);
         return { data, success: true };
       }
-      
+
       // Real API implementation would go here
-      throw new Error('Real API not implemented yet');
+      throw new Error("Real API not implemented yet");
     } catch (error: any) {
       return { error: error.message, success: false };
     }
-  }
+  },
 };
 
 // Summary API
@@ -160,49 +193,150 @@ export const summaryApi = {
         const data = await mockApi.getSummary(id);
         return { data, success: true };
       }
-      
+
       // Real API implementation would go here
-      throw new Error('Real API not implemented yet');
+      throw new Error("Real API not implemented yet");
     } catch (error: any) {
       return { error: error.message, success: false };
     }
   },
-  
-  createSummary: async (transcriptionId: string): Promise<ApiResponse<Summary>> => {
+
+  createSummary: async (
+    transcriptionId: string
+  ): Promise<ApiResponse<Summary>> => {
     try {
       if (USE_MOCK_API) {
         const data = await mockApi.createSummary(transcriptionId);
         return { data, success: true };
       }
-      
+
       // Real API implementation would go here
-      throw new Error('Real API not implemented yet');
+      throw new Error("Real API not implemented yet");
     } catch (error: any) {
       return { error: error.message, success: false };
     }
-  }
+  },
+};
+
+// Audio API
+export const audioApi = {
+  uploadAudio: async (
+    sessionId: string,
+    audioBlob: Blob,
+    metadata: AudioMetadata
+  ): Promise<ApiResponse<string>> => {
+    try {
+      if (USE_MOCK_API) {
+        return { data: "mock-audio-url", success: true };
+      }
+
+      const formData = new FormData();
+      formData.append("audio", audioBlob, metadata.fileName);
+      formData.append("sessionId", sessionId);
+
+      // Add metadata
+      formData.append(
+        "metadata",
+        JSON.stringify({
+          ...metadata,
+          contentType: audioBlob.type,
+          fileSize: audioBlob.size,
+          uploadDate: new Date().toISOString(),
+          // Metadata for S3
+          s3Metadata: {
+            "Content-Type": audioBlob.type,
+            "Content-Length": audioBlob.size,
+            "x-amz-meta-session-id": sessionId,
+            "x-amz-meta-duration": metadata.duration,
+            "x-amz-meta-recorded-date": metadata.dateRecorded,
+            "x-amz-meta-sample-rate": metadata.sampleRate,
+            "x-amz-meta-channels": metadata.channels,
+            "x-amz-meta-bit-rate": metadata.bitRate,
+          },
+        })
+      );
+
+      console.log(formData, "form data");
+      
+
+      const response = await axiosInstance.post("/audio/upload", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      return { data: response.data.url, success: true };
+    } catch (error: any) {
+      return {
+        error: error.response?.data?.message || error.message,
+        success: false,
+      };
+    }
+  },
+
+  getAudioUrl: async (sessionId: string): Promise<ApiResponse<string>> => {
+    try {
+      if (USE_MOCK_API) {
+        return { data: "mock-audio-url", success: true };
+      }
+
+      const response = await axiosInstance.get(`/audio/${sessionId}`);
+      return { data: response.data.url, success: true };
+    } catch (error: any) {
+      return {
+        error: error.response?.data?.message || error.message,
+        success: false,
+      };
+    }
+  },
+
+  deleteAudio: async (sessionId: string): Promise<ApiResponse<void>> => {
+    try {
+      if (USE_MOCK_API) {
+        return { success: true };
+      }
+
+      await axiosInstance.delete(`/audio/${sessionId}`);
+      return { success: true };
+    } catch (error: any) {
+      return {
+        error: error.response?.data?.message || error.message,
+        success: false,
+      };
+    }
+  },
 };
 
 // Helper functions for mapping between frontend and backend data formats
 const mapSessionStatus = (frontendStatus: SessionStatus): string => {
   // Convert from lowercase-hyphenated to UPPERCASE_UNDERSCORE format
   switch (frontendStatus) {
-    case SessionStatus.SCHEDULED: return 'SCHEDULED';
-    case SessionStatus.IN_PROGRESS: return 'IN_PROGRESS';
-    case SessionStatus.COMPLETED: return 'COMPLETED';
-    case SessionStatus.CANCELLED: return 'CANCELLED';
-    default: return 'SCHEDULED';
+    case SessionStatus.SCHEDULED:
+      return "SCHEDULED";
+    case SessionStatus.IN_PROGRESS:
+      return "IN_PROGRESS";
+    case SessionStatus.COMPLETED:
+      return "COMPLETED";
+    case SessionStatus.CANCELLED:
+      return "CANCELLED";
+    default:
+      return "SCHEDULED";
   }
 };
 
 const mapSessionStatusToFrontend = (backendStatus: string): SessionStatus => {
   // Convert from UPPERCASE_UNDERSCORE to lowercase-hyphenated format
   switch (backendStatus) {
-    case 'SCHEDULED': return SessionStatus.SCHEDULED;
-    case 'IN_PROGRESS': return SessionStatus.IN_PROGRESS;
-    case 'COMPLETED': return SessionStatus.COMPLETED;
-    case 'CANCELLED': return SessionStatus.CANCELLED;
-    default: return SessionStatus.SCHEDULED;
+    case "SCHEDULED":
+      return SessionStatus.SCHEDULED;
+    case "IN_PROGRESS":
+      return SessionStatus.IN_PROGRESS;
+    case "COMPLETED":
+      return SessionStatus.COMPLETED;
+    case "CANCELLED":
+      return SessionStatus.CANCELLED;
+    default:
+      return SessionStatus.SCHEDULED;
   }
 };
 
@@ -216,12 +350,13 @@ const mapSessionFromBackend = (backendSession: any): Session => {
     notes: backendSession.notes,
     recordingUrl: backendSession.recordingUrl,
     transcriptionId: backendSession.transcriptionId,
-    summaryId: backendSession.summaryId
+    summaryId: backendSession.summaryId,
   };
 };
 
 export default {
   sessions: sessionsApi,
   transcription: transcriptionApi,
-  summary: summaryApi
+  summary: summaryApi,
+  audio: audioApi,
 };
