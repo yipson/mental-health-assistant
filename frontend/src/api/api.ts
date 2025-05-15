@@ -256,9 +256,6 @@ export const audioApi = {
         })
       );
 
-      console.log(formData, "form data");
-      
-
       const response = await axiosInstance.post("/audio/upload", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
