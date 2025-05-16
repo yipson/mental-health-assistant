@@ -183,12 +183,13 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
 
       // Handle recording stop
       mediaRecorder.current.onstop = async () => {
-        // The MediaRecorder is already in 'inactive' state when onstop is triggered
-        // No need to call requestData() as it will throw an error
         console.log("Recording stopped");
         
-        // Wait a short time for the ondataavailable event to fire and add to audioChunks
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Wait a longer time for the ondataavailable event to fire and add to audioChunks
+        // This is crucial to ensure all data is collected
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        console.log("Audio chunks after stop:", audioChunks.current.length);
         
         if (audioChunks.current.length > 0) {
           // Get the MIME type that was used for recording
@@ -252,8 +253,18 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
     setShowStopConfirm(false);
     
     if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
-      // Stop the recorder which will trigger onstop event
-      mediaRecorder.current.stop();
+      try {
+        // First, explicitly request data to ensure we get the final chunk
+        mediaRecorder.current.requestData();
+        
+        // Wait a moment for the data to be processed
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Then stop the recorder which will trigger onstop event
+        mediaRecorder.current.stop();
+      } catch (error) {
+        console.error("Error during stop recording:", error);
+      }
     }
     
     setIsRecording(false);
