@@ -7,4 +7,15 @@ export interface AudioMetadata {
     sampleRate?: number;
     channels?: number;
     bitRate?: number;
+    chunkNumber: number;
+    sessionId: string;
+    isLastChunk: boolean;
+}
+
+// Interface to match the backend AudioChunkResponse
+export interface AudioChunkResponse {
+    success: boolean;
+    filename: string;
+    chunkIndex: number;
+    isLastChunk: boolean;
 }

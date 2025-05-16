@@ -16,18 +16,18 @@ import {
   AlertDialogOverlay,
   Badge,
   Tooltip,
+  Alert,
+  AlertIcon,
+  AlertTitle,
+  AlertDescription,
 } from "@chakra-ui/react";
 import {
   FaMicrophone,
   FaStop,
   FaTrash,
-  FaPlay,
-  FaPause,
-  FaBackward,
-  FaForward,
+  FaUndo,
 } from "react-icons/fa";
-import WaveformDisplay from "./WaveformDisplay";
-import { transcriptionApi, audioApi } from "../../api/api";
+import { audioApi } from "../../api/api";
 
 interface AudioRecorderProps {
   sessionId: string;
@@ -35,26 +35,22 @@ interface AudioRecorderProps {
   onTranscriptionComplete?: (transcriptionId: string) => void;
 }
 
-type RecordingData = {
+interface RecordingData {
   blob: Blob;
-  url: string;
   duration: number;
-};
+  type?: string;
+}
 
 const AudioRecorder: React.FC<AudioRecorderProps> = ({
   sessionId,
   onRecordingComplete,
-  onTranscriptionComplete,
 }) => {
   const toast = useToast();
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
-  const [recordingData, setRecordingData] = useState<RecordingData | null>(
-    null
-  );
-  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingData, setRecordingData] = useState<RecordingData | null>(null);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Refs
   const mediaRecorder = useRef<MediaRecorder | null>(null);
@@ -62,51 +58,89 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const stream = useRef<MediaStream | null>(null);
   const timerInterval = useRef<NodeJS.Timeout | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const audioPlayer = useRef<HTMLAudioElement | null>(null);
+  const [currentChunkDuration, setCurrentChunkDuration] = useState(0);
+  const CHUNK_DURATION = 5; // 5 seconds for testing, use 5*60 for production
+  const chunkInterval = useRef<NodeJS.Timeout | null>(null);
+  const currentChunkIndexRef = useRef(0);
 
   // Timer for recording duration
   useEffect(() => {
     if (isRecording) {
+      // Set up timer for overall recording time
       timerInterval.current = setInterval(() => {
-        setRecordingTime((prev) => prev + 1);
+        setRecordingTime(prev => prev + 1);
       }, 1000);
-    } else if (timerInterval.current) {
-      clearInterval(timerInterval.current);
-      timerInterval.current = null;
-    }
-
-    return () => {
+      
+      // Set up separate timer for chunk duration
+      chunkInterval.current = setInterval(() => {
+        setCurrentChunkDuration(prev => {
+          const newDuration = prev + 1;
+          console.log(`Chunk duration: ${newDuration}s`);
+          
+          // If we've reached the chunk duration limit, process the chunk
+          if (newDuration >= CHUNK_DURATION) {
+            // Use setTimeout to avoid state update conflicts
+            setTimeout(() => handleChunkComplete(), 0);
+            return 0;
+          }
+          return newDuration;
+        });
+      }, 1000);
+    } else {
+      // Clear both timers when not recording
       if (timerInterval.current) {
         clearInterval(timerInterval.current);
         timerInterval.current = null;
       }
+      if (chunkInterval.current) {
+        clearInterval(chunkInterval.current);
+        chunkInterval.current = null;
+      }
+    }
+
+    return () => {
+      if (timerInterval.current) clearInterval(timerInterval.current);
+      if (chunkInterval.current) clearInterval(chunkInterval.current);
     };
   }, [isRecording]);
 
-  // Clean up on unmount
-  useEffect(() => {
-    return () => {
-      stopRecording();
-      if (timerInterval.current) {
-        clearInterval(timerInterval.current);
+  const handleChunkComplete = async () => {
+    if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
+      // Request data from the media recorder
+      mediaRecorder.current.requestData();
+      
+      // Wait a short time for the ondataavailable event to fire and add to audioChunks
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Create a blob from all chunks collected so far
+      if (audioChunks.current.length > 0) {
+        const chunkBlob = new Blob(audioChunks.current, { type: "audio/webm" });
+        
+        // Get the current chunk index from ref
+        const chunkIndexToSend = currentChunkIndexRef.current;
+        console.log(`Uploading chunk with index: ${chunkIndexToSend}`);
+        
+        // Upload the completed chunk with the current index
+        await handleAudioUpload(chunkBlob, currentChunkDuration, chunkIndexToSend);
+        
+        // Reset the chunks array after uploading
+        audioChunks.current = [];
+        
+        // Increment the chunk index for the next chunk - use ref for immediate update
+        currentChunkIndexRef.current = chunkIndexToSend + 1;
       }
-    };
-  }, []);
-
-  // Cleanup audio player on unmount
-  useEffect(() => {
-    return () => {
-      if (audioPlayer.current) {
-        audioPlayer.current.pause();
-        audioPlayer.current = null;
-      }
-    };
-  }, []);
+      
+      // Reset the chunk duration timer
+      setCurrentChunkDuration(0);
+    }
+  };
 
   const startRecording = async () => {
     try {
       // Reset state
       setRecordingTime(0);
+      setCurrentChunkDuration(0);
+      currentChunkIndexRef.current = 0;
       audioChunks.current = [];
 
       // Request microphone access
@@ -114,78 +148,97 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
         audio: true,
       });
 
-      // Create media recorder
-      mediaRecorder.current = new MediaRecorder(stream.current);
+      // Create media recorder with more widely supported format
+      let selectedMimeType = '';
+      
+      // Check for MP3 support first (most compatible)
+      if (MediaRecorder.isTypeSupported('audio/mp3')) {
+        selectedMimeType = 'audio/mp3';
+      } else if (MediaRecorder.isTypeSupported('audio/mpeg')) {
+        selectedMimeType = 'audio/mpeg';
+      } else if (MediaRecorder.isTypeSupported('audio/wav')) {
+        selectedMimeType = 'audio/wav';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        selectedMimeType = 'audio/webm';
+      } else {
+        // Fall back to browser default
+        selectedMimeType = '';
+      }
+      
+      console.log("Using MIME type for recording:", selectedMimeType || "browser default");
+      
+      // Create the media recorder with the supported MIME type
+      mediaRecorder.current = new MediaRecorder(stream.current, {
+        mimeType: selectedMimeType || undefined,
+        audioBitsPerSecond: 128000, // Optimize for voice recording
+      });
 
       // Handle data available event
-      mediaRecorder.current.ondataavailable = (event) => {
+      mediaRecorder.current.ondataavailable = async (event) => {
         if (event.data.size > 0) {
           audioChunks.current.push(event.data);
+          console.log("Data available, size: " + event.data.size);
         }
       };
 
       // Handle recording stop
-      mediaRecorder.current.onstop = () => {
+      mediaRecorder.current.onstop = async () => {
+        // The MediaRecorder is already in 'inactive' state when onstop is triggered
+        // No need to call requestData() as it will throw an error
+        console.log("Recording stopped");
+        
+        // Wait a short time for the ondataavailable event to fire and add to audioChunks
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         if (audioChunks.current.length > 0) {
-          const audioBlob = new Blob(audioChunks.current, {
-            type: "audio/webm",
-          });
-          const audioUrl = URL.createObjectURL(audioBlob);
-
-          const newRecordingData = {
-            blob: audioBlob,
-            url: audioUrl,
-            duration: recordingTime,
-          };
-
-          setRecordingData(newRecordingData);
-
-          if (onRecordingComplete) {
-            onRecordingComplete(audioUrl);
+          // Get the MIME type that was used for recording
+          const mimeType = mediaRecorder.current?.mimeType || '';
+          console.log("Creating final audio blob with MIME type:", mimeType);
+          
+          // Try to use a more compatible format for recording
+          let blobType = mimeType;
+          if (!mimeType || mimeType.includes('webm')) {
+            blobType = 'audio/mp3';
           }
+          
+          console.log("Final blob type for recording:", blobType);
+          
+          // Create a blob with the appropriate MIME type
+          const audioBlob = new Blob(audioChunks.current, {
+            type: blobType,
+          });
+          
+          // Save recording data without URL for playback
+          setRecordingData({
+            blob: audioBlob,
+            type: blobType,
+            duration: recordingTime,
+          });
+          
+          // Upload the final chunk
+          setIsUploading(true);
+          const chunkIndexToSend = currentChunkIndexRef.current;
+          await handleAudioUpload(audioBlob, currentChunkDuration, chunkIndexToSend, true);
+          setIsUploading(false);
         }
-
-        // Clean up
+        
+        // Stop and clean up the microphone stream
         if (stream.current) {
-          stream.current.getTracks().forEach((track) => track.stop());
+          stream.current.getTracks().forEach(track => track.stop());
           stream.current = null;
         }
       };
 
       // Start recording
-      mediaRecorder.current.start(1000); // Capture in 1-second chunks
+      mediaRecorder.current.start();
       setIsRecording(true);
-
-      toast({
-        title: "Recording started",
-        status: "info",
-        duration: 2000,
-        isClosable: true,
-      });
     } catch (error) {
       console.error("Error starting recording:", error);
       toast({
-        title: "Failed to start recording",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Could not access microphone",
+        title: "Recording failed",
+        description: error instanceof Error ? error.message : "Could not access microphone",
         status: "error",
         duration: 3000,
-        isClosable: true,
-      });
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorder.current && mediaRecorder.current.state !== "inactive") {
-      mediaRecorder.current.stop();
-      setIsRecording(false);
-
-      toast({
-        title: "Recording stopped",
-        status: "success",
-        duration: 2000,
         isClosable: true,
       });
     }
@@ -195,162 +248,39 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
     setShowStopConfirm(true);
   };
 
-  const handleStartRecording = async () => {
-    try {
-      await startRecording();
-    } catch (error) {
-      toast({
-        title: "Recording Error",
-        description:
-          "Failed to start recording. Please check microphone permissions.",
-        status: "error",
-        duration: 3000,
-      });
-    }
-  };
-
-  const confirmStopRecording = () => {
+  const confirmStopRecording = async () => {
     setShowStopConfirm(false);
-    stopRecording();
+    
+    if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
+      // Stop the recorder which will trigger onstop event
+      mediaRecorder.current.stop();
+    }
+    
+    setIsRecording(false);
   };
 
-  //TODO: implement transcription in another logic
-  /**
-  const handleTranscribe = async () => {
-    if (!recordingData?.blob) {
-      toast({
-        title: "No recording available",
-        status: "error",
-        duration: 3000,
-        isClosable: true,
-      });
-      return;
-    }
-
+  const handleAudioUpload = async (
+    audioBlob: Blob,
+    chunkDuration: number,
+    chunkIndex: number,
+    isLastChunk: boolean = false
+  ) => {
     try {
-      setIsTranscribing(true);
-      toast({
-        title: "Starting transcription",
-        status: "info",
-        duration: 2000,
-        isClosable: true,
-      });
-
-      // TODO: Implement transcription logic, search for OpenAI Whisper API or similar
-      const response = await transcriptionApi.createTranscription(
-        sessionId,
-        recordingData.blob
-      );
-
-      if (response.success && response.data) {
-        if (onTranscriptionComplete) {
-          onTranscriptionComplete(response.data.id);
-        }
-
-        toast({
-          title: "Transcription complete",
-          status: "success",
-          duration: 3000,
-          isClosable: true,
-        });
-      } else {
-        throw new Error(response.error || "Failed to transcribe");
-      }
-    } catch (error) {
-      toast({
-        title: "Transcription failed",
-        description: error instanceof Error ? error.message : "Unknown error",
-        status: "error",
-        duration: 3000,
-        isClosable: true,
-      });
-    } finally {
-      setIsTranscribing(false);
-    }
-  };
-  **/
-
-  const handlePlayPause = () => {
-    if (!recordingData?.url) return;
-
-    if (!audioPlayer.current) {
-      audioPlayer.current = new Audio(recordingData.url);
-      audioPlayer.current.onended = () => setIsPlaying(false);
-    }
-
-    if (isPlaying) {
-      audioPlayer.current.pause();
-      setIsPlaying(false);
-    } else {
-      audioPlayer.current.play();
-      setIsPlaying(true);
-    }
-  };
-
-  const handleReset = () => {
-    if (audioPlayer.current) {
-      audioPlayer.current.pause();
-      audioPlayer.current = null;
-    }
-    setIsPlaying(false);
-
-    // Clean up any existing recording
-    if (recordingData?.url) {
-      URL.revokeObjectURL(recordingData.url);
-    }
-
-    setRecordingData(null);
-    setRecordingTime(0);
-
-    toast({
-      title: "Recording reset",
-      status: "info",
-      duration: 2000,
-      isClosable: true,
-    });
-  };
-
-  const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs
-      .toString()
-      .padStart(2, "0")}`;
-  };
-
-
-
-
-
-
-
-
-
-
-
-  const handleForward = () => {
-    if (audioPlayer.current) {
-      audioPlayer.current.currentTime += 10;
-    }
-  };
-
-  const handleBackward = () => {
-    if (audioPlayer.current) {
-      audioPlayer.current.currentTime -= 10;
-    }
-  };
-
-  const handleAudioUpload = async (audioBlob: Blob, duration: number) => {
-    try {
+      console.log(`Uploading chunk ${chunkIndex}, duration: ${chunkDuration}s, is last chunk: ${isLastChunk}`);
+      
+      // Create metadata for the chunk with all required fields
       const metadata = {
-        fileName: `session_${sessionId}_${Date.now()}.webm`,
-        mimeType: audioBlob.type,
-        duration: duration,
+        fileName: `audio_${sessionId}_chunk_${chunkIndex}.${audioBlob.type.split('/')[1] || 'webm'}`,
+        mimeType: audioBlob.type || 'audio/webm',
+        duration: chunkDuration,
         size: audioBlob.size,
         dateRecorded: new Date().toISOString(),
-        sampleRate: mediaRecorder.current?.audioBitsPerSecond || 44100,
+        sampleRate: 44100, // Standard sample rate
         channels: 2,
         bitRate: mediaRecorder.current?.audioBitsPerSecond || 128000,
+        chunkNumber: chunkIndex,
+        sessionId: sessionId,
+        isLastChunk: isLastChunk,
       };
 
       const response = await audioApi.uploadAudio(
@@ -360,18 +290,24 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
       );
 
       if (response.success && response.data) {
-        if (onRecordingComplete) {
-          onRecordingComplete(response.data);
+        // Only trigger the onRecordingComplete callback when the recording is actually complete
+        if (isLastChunk && onRecordingComplete) {
+          // Only when recording is fully stopped
+          onRecordingComplete(response.data.filename);
         }
 
-        toast({
-          title: "Audio uploaded successfully",
-          status: "success",
-          duration: 2000,
-          isClosable: true,
-        });
+        if (isLastChunk) {
+          toast({
+            title: "Recording uploaded successfully",
+            status: "success",
+            duration: 3000,
+            isClosable: true,
+          });
+        } else {
+          console.log(`Chunk ${chunkIndex} uploaded successfully`);
+        }
       } else {
-        throw new Error(response.error || "Failed to upload audio");
+        throw new Error(response.error || "Failed to upload audio chunk");
       }
     } catch (error) {
       toast({
@@ -384,133 +320,72 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
     }
   };
 
-  // Modify the mediaRecorder.onstop handler
-  if (mediaRecorder.current) {
-    mediaRecorder.current.onstop = () => {
-      if (audioChunks.current.length > 0) {
-        const audioBlob = new Blob(audioChunks.current, {
-          type: "audio/webm",
-        });
-        const audioUrl = URL.createObjectURL(audioBlob);
-
-        const newRecordingData = {
-          blob: audioBlob,
-          url: audioUrl,
-          duration: recordingTime,
-        };
-
-        setRecordingData(newRecordingData);
-
-        // Call handleAudioUpload with the blob and duration
-        handleAudioUpload(audioBlob, recordingTime);
-      }
-
-      // Clean up
-      if (stream.current) {
-        stream.current.getTracks().forEach((track) => track.stop());
-        stream.current = null;
-      }
-    };
-  }
+  const handleReset = () => {
+    setRecordingData(null);
+    setRecordingTime(0);
+    
+    toast({
+      title: "Reset complete",
+      status: "info",
+      duration: 2000,
+      isClosable: true,
+    });
+  };
+  
+  // Format seconds to MM:SS
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   return (
     <Box
       borderWidth="1px"
       borderRadius="lg"
       overflow="hidden"
-      p={4}
-      bg="white"
+      p={5}
       shadow="md"
+      bg="white"
     >
       <VStack spacing={4} align="stretch">
-        {/* Sección del Grabador */}
+        <Flex justifyContent="space-between" alignItems="center">
+          <Text fontSize="xl" fontWeight="bold">
+            Voice Recorder
+          </Text>
+          <Badge colorScheme={isRecording ? "red" : "green"} borderRadius="full" px={2}>
+            {isRecording ? "Recording" : "Ready"}
+          </Badge>
+        </Flex>
+
         <Box>
-          <Flex justify="space-between" align="center" mb={4}>
-            <Text fontSize="xl" fontWeight="bold">
-              Session Recorder
-            </Text>
-
-            {isRecording && (
-              <Badge
+          <Text textAlign="center" fontSize="2xl" fontWeight="bold" mb={2}>
+            {formatTime(recordingTime)}
+          </Text>
+          {isRecording && (
+            <>
+              <Progress
+                value={(currentChunkDuration / CHUNK_DURATION) * 100}
                 colorScheme="red"
-                fontSize="md"
-                px={2}
-                py={1}
-                borderRadius="full"
-                animation="pulse 1.5s infinite"
-                sx={{
-                  "@keyframes pulse": {
-                    "0%": { opacity: 1 },
-                    "50%": { opacity: 0.5 },
-                    "100%": { opacity: 1 },
-                  },
-                }}
-              >
-                RECORDING
-              </Badge>
-            )}
-          </Flex>
-
-          {/* Audio visualization or waveform */}
-          <Box h="60px" bg="gray.50" borderRadius="md" p={2} mb={4}>
-            {recordingData && !isRecording ? (
-              <WaveformDisplay audioUrl={recordingData.url} />
-            ) : (
-              <Flex h="100%" align="center" justify="center">
-                <Text color="gray.400" fontSize="sm">
-                  {isRecording
-                    ? "Recording in progress..."
-                    : "Audio visualization will appear here"}
-                </Text>
-              </Flex>
-            )}
-          </Box>
-
-          {/* Timer display */}
-          <Flex
-            justify="center"
-            align="center"
-            h="50px"
-            bg={isRecording ? "red.50" : "gray.50"}
-            borderRadius="md"
-            mb={4}
-          >
-            {isRecording ? (
-              <Text
-                fontSize="2xl"
-                fontWeight="bold"
-                color="red.500"
-                fontFamily="mono"
-              >
-                {formatTime(recordingTime)}
+                size="sm"
+                mb={2}
+              />
+              <Text fontSize="xs" color="gray.600" textAlign="center">
+                Current chunk: {currentChunkDuration}s / {CHUNK_DURATION}s
               </Text>
-            ) : recordingData ? (
-              <Text fontSize="md" color="green.500" fontWeight="semibold">
-                Recording complete - {formatTime(recordingData.duration)}
-              </Text>
-            ) : (
-              <Text fontSize="md" color="gray.500">
-                Ready to record
-              </Text>
-            )}
-          </Flex>
+            </>
+          )}
         </Box>
 
-        {/* Sección de Controles */}
-        <Box borderTop="2px" borderColor="gray.200" pt={4}>
-
-
-
-
-          {/* Recording controls */}
-          <HStack spacing={4} justify="center" mb={4}>
+        <Box>
+          <HStack spacing={4} justify="center">
             {!isRecording && !recordingData && (
               <Tooltip label="Start Record">
                 <Button
                   leftIcon={<FaMicrophone />}
-                  colorScheme="red"
-                  onClick={handleStartRecording}
-                  size="lg"
+                  colorScheme="blue"
+                  onClick={startRecording}
+                  isDisabled={isUploading}
                 >
                   Start Record
                 </Button>
@@ -521,7 +396,7 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
               <Tooltip label="Stop Record">
                 <Button
                   leftIcon={<FaStop />}
-                  colorScheme="gray"
+                  colorScheme="red"
                   onClick={handleStopRecording}
                 >
                   Stop Record
@@ -530,59 +405,36 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
             )}
           </HStack>
 
-          {/* Playback controls */}
+          {/* Show recording success message instead of audio player */}
           {recordingData && !isRecording && (
-            <HStack spacing={4} justify="center">
-              <Tooltip label="Backward 10 seconds">
-                <Button
-                  leftIcon={<FaBackward />}
-                  colorScheme="blue"
-                  variant="outline"
-                  onClick={handleBackward}
-                >
-                  -10s
-                </Button>
-              </Tooltip>
-
-              <Tooltip label={isPlaying ? "Pause" : "Play"}>
-                <Button
-                  leftIcon={isPlaying ? <FaPause /> : <FaPlay />}
-                  colorScheme="blue"
-                  onClick={handlePlayPause}
-                >
-                  {isPlaying ? "Pause" : "Play"}
-                </Button>
-              </Tooltip>
-
-              <Tooltip label="Foward 10 seconds">
-                <Button
-                  leftIcon={<FaForward />}
-                  colorScheme="blue"
-                  variant="outline"
-                  onClick={handleForward}
-                >
-                  +10s
-                </Button>
-              </Tooltip>
-
-              <Tooltip label="Reset record">
-                <Button
-                  leftIcon={<FaTrash />}
-                  colorScheme="red"
-                  variant="outline"
-                  onClick={handleReset}
-                >
-                  Reset
-                </Button>
-              </Tooltip>
-            </HStack>
+            <Box mt={4} textAlign="center">
+              <Alert status="success" borderRadius="md">
+                <AlertIcon />
+                <Box>
+                  <AlertTitle>Recording complete!</AlertTitle>
+                  <AlertDescription>
+                    Your audio recording has been successfully sent to our servers.
+                  </AlertDescription>
+                </Box>
+              </Alert>
+              
+              <Button 
+                leftIcon={<FaUndo />} 
+                onClick={handleReset}
+                mt={4}
+                colorScheme="blue"
+                variant="outline"
+              >
+                Record Again
+              </Button>
+            </Box>
           )}
         </Box>
 
-        {isTranscribing && (
-          <Box>
-            <Text mb={2}>Translating audio...</Text>
-            <Progress size="sm" isIndeterminate colorScheme="brand" />
+        {isUploading && (
+          <Box textAlign="center">
+            <Text mb={2}>Uploading recording...</Text>
+            <Progress size="sm" isIndeterminate colorScheme="blue" />
           </Box>
         )}
       </VStack>

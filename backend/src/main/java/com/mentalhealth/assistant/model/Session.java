@@ -18,17 +18,21 @@ public class Session {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(name = "patient_name",
+            nullable = false)
     private String patientName;
 
-    @Column(nullable = false)
+    @Column(name = "date",
+            nullable = false)
     private LocalDateTime date;
 
-    @Column(nullable = false)
+    @Column(name = "duration",
+            nullable = false)
     private Integer duration; // in minutes
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "status",
+            nullable = false)
     private SessionStatus status;
 
     private String notes;
