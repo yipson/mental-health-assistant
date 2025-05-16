@@ -51,8 +51,14 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const [recordingData, setRecordingData] = useState<RecordingData | null>(null);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-
-  // Refs
+  
+  // Refs for tracking recording state and preventing duplicate uploads
+  const finalChunkUploadedRef = useRef(false); // Tracks if the final chunk has been uploaded
+  const lastChunkProcessedTime = useRef(0); // Timestamp of the last processed chunk
+  const isChunkUploadInProgress = useRef(false); // Flag to prevent parallel uploads
+  const uploadedChunksRef = useRef<Set<number>>(new Set()); // Set of chunk indexes that have been uploaded
+  
+  // Refs for audio recording
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
   const stream = useRef<MediaStream | null>(null);
@@ -104,35 +110,76 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
     };
   }, [isRecording]);
 
+  // Esta sección ahora está vacía ya que lastChunkProcessedTime se definió arriba con las otras refs
+
   const handleChunkComplete = async () => {
-    if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
-      // Request data from the media recorder
-      mediaRecorder.current.requestData();
-      
-      // Wait a short time for the ondataavailable event to fire and add to audioChunks
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Create a blob from all chunks collected so far
-      if (audioChunks.current.length > 0) {
-        const chunkBlob = new Blob(audioChunks.current, { type: "audio/webm" });
-        
-        // Get the current chunk index from ref
-        const chunkIndexToSend = currentChunkIndexRef.current;
-        console.log(`Uploading chunk with index: ${chunkIndexToSend}`);
-        
-        // Upload the completed chunk with the current index
-        await handleAudioUpload(chunkBlob, currentChunkDuration, chunkIndexToSend);
-        
-        // Reset the chunks array after uploading
-        audioChunks.current = [];
-        
-        // Increment the chunk index for the next chunk - use ref for immediate update
-        currentChunkIndexRef.current = chunkIndexToSend + 1;
-      }
-      
-      // Reset the chunk duration timer
-      setCurrentChunkDuration(0);
+    // Prevent duplicate processing by checking time since last processing
+    // We enforce a minimum gap of 2 seconds between chunk processing
+    const now = Date.now();
+    if (now - lastChunkProcessedTime.current < 2000) {
+      console.log('Skipping duplicate chunk processing, too soon after last one');
+      return;
     }
+    
+    // Check if we're already uploading a chunk
+    if (isChunkUploadInProgress.current) {
+      console.log('Upload already in progress, skipping');
+      return;
+    }
+
+    if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
+      try {
+        // Set flag to indicate upload in progress
+        isChunkUploadInProgress.current = true;
+        
+        // Request data from the media recorder
+        mediaRecorder.current.requestData();
+        
+        // Wait a short time for the ondataavailable event to fire and add to audioChunks
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Create a blob from all chunks collected so far
+        if (audioChunks.current.length > 0) {
+          const chunkBlob = new Blob(audioChunks.current, { type: "audio/webm" });
+          
+          // Get the current chunk index from ref
+          const chunkIndexToSend = currentChunkIndexRef.current;
+          
+          // Check if we already uploaded this chunk index
+          if (uploadedChunksRef.current.has(chunkIndexToSend)) {
+            console.log(`Chunk with index ${chunkIndexToSend} already uploaded, skipping`);
+            isChunkUploadInProgress.current = false;
+            return;
+          }
+          
+          console.log(`Uploading chunk with index: ${chunkIndexToSend}, size: ${chunkBlob.size} bytes`);
+          
+          // Only upload if we're not in the process of stopping the recording
+          // This prevents double uploads during the stop recording process
+          if (isRecording) {
+            // Mark this time as when we processed a chunk
+            lastChunkProcessedTime.current = now;
+            
+            await handleAudioUpload(chunkBlob, currentChunkDuration, chunkIndexToSend);
+            
+            // Mark this chunk as uploaded
+            uploadedChunksRef.current.add(chunkIndexToSend);
+            
+            // Reset the chunks array after uploading
+            audioChunks.current = [];
+            
+            // Increment the chunk index for the next chunk - use ref for immediate update
+            currentChunkIndexRef.current = chunkIndexToSend + 1;
+          }
+        }
+      } finally {
+        // Clear the upload in progress flag
+        isChunkUploadInProgress.current = false;
+      }
+    }
+    
+    // Reset the chunk duration timer
+    setCurrentChunkDuration(0);
   };
 
   const startRecording = async () => {
@@ -142,6 +189,10 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
       setCurrentChunkDuration(0);
       currentChunkIndexRef.current = 0;
       audioChunks.current = [];
+      lastChunkProcessedTime.current = 0;
+      isChunkUploadInProgress.current = false;
+      finalChunkUploadedRef.current = false;
+      uploadedChunksRef.current.clear(); // Clear the set of uploaded chunks
 
       // Request microphone access
       stream.current = await navigator.mediaDevices.getUserMedia({
@@ -168,6 +219,9 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
       console.log("Using MIME type for recording:", selectedMimeType || "browser default");
       
       // Create the media recorder with the supported MIME type
+      // Set a timeslice of 5000ms (5 seconds) to match our CHUNK_DURATION
+      // This makes the MediaRecorder emit ondataavailable events at regular intervals
+      // that match our chunk processing, reducing the chance of duplicates
       mediaRecorder.current = new MediaRecorder(stream.current, {
         mimeType: selectedMimeType || undefined,
         audioBitsPerSecond: 128000, // Optimize for voice recording
@@ -177,7 +231,10 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
       mediaRecorder.current.ondataavailable = async (event) => {
         if (event.data.size > 0) {
           audioChunks.current.push(event.data);
-          console.log("Data available, size: " + event.data.size);
+          console.log("Data available, size: " + event.data.size + ", chunks total: " + audioChunks.current.length);
+          
+          // We don't process chunks here, we let handleChunkComplete do it
+          // This prevents duplicate uploads since we have better control of when chunks are sent
         }
       };
 
@@ -216,11 +273,28 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
             duration: recordingTime,
           });
           
-          // Upload the final chunk
-          setIsUploading(true);
-          const chunkIndexToSend = currentChunkIndexRef.current;
-          await handleAudioUpload(audioBlob, currentChunkDuration, chunkIndexToSend, true);
-          setIsUploading(false);
+          // Only upload the final chunk if it hasn't been uploaded already
+          // and if we're not in the process of uploading another chunk
+          if (!finalChunkUploadedRef.current && !isChunkUploadInProgress.current) {
+            // Check if this chunk index was already uploaded
+            const chunkIndexToSend = currentChunkIndexRef.current;
+            if (uploadedChunksRef.current.has(chunkIndexToSend)) {
+              console.log(`Final chunk with index ${chunkIndexToSend} already uploaded, skipping`);
+            } else {
+              setIsUploading(true);
+              isChunkUploadInProgress.current = true;
+              try {
+                await handleAudioUpload(audioBlob, currentChunkDuration, chunkIndexToSend, true);
+                uploadedChunksRef.current.add(chunkIndexToSend);
+                finalChunkUploadedRef.current = true; // Mark as uploaded
+              } finally {
+                isChunkUploadInProgress.current = false;
+                setIsUploading(false);
+              }
+            }
+          } else {
+            console.log("Final chunk already uploaded or upload in progress, skipping duplicate upload");
+          }
         }
         
         // Stop and clean up the microphone stream
@@ -252,6 +326,12 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
   const confirmStopRecording = async () => {
     setShowStopConfirm(false);
     
+    // Set recording state to false first to prevent parallel uploads
+    setIsRecording(false);
+    
+    // Reset the final chunk upload flag
+    finalChunkUploadedRef.current = false;
+    
     if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
       try {
         // First, explicitly request data to ensure we get the final chunk
@@ -266,8 +346,6 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
         console.error("Error during stop recording:", error);
       }
     }
-    
-    setIsRecording(false);
   };
 
   const handleAudioUpload = async (
@@ -276,6 +354,11 @@ const AudioRecorder: React.FC<AudioRecorderProps> = ({
     chunkIndex: number,
     isLastChunk: boolean = false
   ) => {
+    // Double-check that this chunk hasn't been uploaded yet
+    if (uploadedChunksRef.current.has(chunkIndex)) {
+      console.log(`Chunk ${chunkIndex} already uploaded, skipping duplicate upload`);
+      return;
+    }
     try {
       console.log(`Uploading chunk ${chunkIndex}, duration: ${chunkDuration}s, is last chunk: ${isLastChunk}`);
       

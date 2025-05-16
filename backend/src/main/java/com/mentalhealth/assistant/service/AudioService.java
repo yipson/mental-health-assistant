@@ -18,9 +18,13 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class AudioService {
+    
+    private static final Logger logger = LoggerFactory.getLogger(AudioService.class);
     
     @Autowired
     private AudioRepository audioRepository;
@@ -64,7 +68,8 @@ public class AudioService {
             
             // If this is the last chunk, merge all chunks
             if (isLastChunk) {
-                mergeChunks(sessionId);
+                // mergeChunks(sessionId);
+                logger.info("Last chunk received for session: " + sessionId);
             }
             
             return new AudioChunkResponse(true, chunkFilename, chunkIndex, isLastChunk);
