@@ -22,15 +22,19 @@ public class AudioController {
     @PostMapping(value = "/upload-chunk"
     , consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
-    public ResponseEntity<AudioChunkResponse> uploadAudioChunk(
-            @RequestParam("file") MultipartFile chunk,
+    public ResponseEntity<String> uploadAudioChunk(
+            @RequestParam("file") MultipartFile file,
             @RequestParam("sessionId") Long sessionId,
             @RequestParam("chunkIndex") Integer chunkIndex,
-            @RequestParam("isLastChunk") boolean isLastChunk
+            @RequestParam("isLastChunk") Boolean isLastChunk
             ) {
         
-        AudioChunkResponse response = audioService.storeAudioChunk(chunk, sessionId, chunkIndex, isLastChunk);
-        return ResponseEntity.ok().body(response);
+        try {
+            audioService.storeAudioChunk(file, sessionId, chunkIndex, isLastChunk);
+            return ResponseEntity.ok("Chunk uploaded successfully");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Error uploading chunk: " + e.getMessage());
+        }
     }
     
 }
