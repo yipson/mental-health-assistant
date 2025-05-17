@@ -18,6 +18,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,7 +36,7 @@ public class AudioService {
     @Value("${app.audio.upload.dir}")
     private String uploadDir;
     
-    public AudioChunkResponse storeAudioChunk(MultipartFile chunk, Long sessionId, 
+    public void storeAudioChunk(MultipartFile chunk, Long sessionId, 
             Integer chunkIndex, boolean isLastChunk) {
         try {
             // Create chunks directory if it doesn't exist
@@ -68,13 +69,14 @@ public class AudioService {
             
             // If this is the last chunk, merge all chunks
             if (isLastChunk) {
-                // mergeChunks(sessionId);
+                mergeChunks(sessionId);
                 logger.info("Last chunk received for session: " + sessionId);
             }
             
-            return new AudioChunkResponse(true, chunkFilename, chunkIndex, isLastChunk);
+            logger.info("Stored audio chunk #" + chunkIndex + " for session " + sessionId + ", isLastChunk=" + isLastChunk);
             
         } catch (IOException e) {
+            logger.error("Failed to store audio chunk: " + e.getMessage(), e);
             throw new AudioProcessingException("Failed to store audio chunk: " + e.getMessage(), e);
         }
     }
@@ -83,38 +85,157 @@ public class AudioService {
         try {
             List<Audio> chunks = audioRepository.findBySessionIdOrderByChunkIndex(sessionId);
             if (chunks.isEmpty()) {
+                logger.warn("No chunks found for session: " + sessionId);
                 return;
             }
             
-            // Create final audio file
+            logger.info("Found " + chunks.size() + " chunks to merge for session: " + sessionId);
+            
+            // Create final audio file path
             String finalFilename = sessionId + "_complete.webm";
             Path finalPath = Paths.get(uploadDir, finalFilename);
             
-            // Merge all chunks
-            try (var outputStream = Files.newOutputStream(finalPath)) {
-                for (Audio chunk : chunks) {
-                    byte[] chunkData = Files.readAllBytes(Paths.get(chunk.getPath()));
-                    outputStream.write(chunkData);
+            boolean mergeSuccessful = false;
+            
+            // Try to merge using FFmpeg first
+            try {
+                mergeSuccessful = mergeWithFFmpeg(chunks, finalPath);
+            } catch (Exception e) {
+                logger.warn("Failed to merge with FFmpeg: " + e.getMessage() + ". Falling back to simple concatenation.");
+            }
+            
+            // If FFmpeg failed, fall back to simple concatenation
+            if (!mergeSuccessful) {
+                try {
+                    mergeWithSimpleConcatenation(chunks, finalPath);
+                    mergeSuccessful = true;
+                } catch (Exception e) {
+                    logger.error("Simple concatenation also failed: " + e.getMessage(), e);
                 }
             }
             
-            // Create final audio entry
-            Audio finalAudio = new Audio();
-            finalAudio.setFilename(finalFilename);
-            finalAudio.setContentType("audio/webm");
-            finalAudio.setPath(finalPath.toString());
-            finalAudio.setChunkIndex(-1); // Indicates this is the merged file
-            finalAudio.setLastChunk(true);
-            finalAudio.setSession(chunks.get(0).getSession());
-            
-            audioRepository.save(finalAudio);
-            
-            // Optionally cleanup chunks
-            cleanupChunks(chunks);
-            
-        } catch (IOException e) {
-            throw new AudioProcessingException("Failed to merge audio chunks: " + e.getMessage(), e);
+            if (mergeSuccessful) {
+                logger.info("Successfully merged " + chunks.size() + " chunks for session " + sessionId);
+                
+                // Create final audio entry
+                Audio finalAudio = new Audio();
+                finalAudio.setFilename(finalFilename);
+                finalAudio.setContentType("audio/webm");
+                finalAudio.setPath(finalPath.toString());
+                finalAudio.setChunkIndex(-1); // Indicates this is the merged file
+                finalAudio.setLastChunk(true);
+                finalAudio.setSession(chunks.get(0).getSession());
+                
+                audioRepository.save(finalAudio);
+                
+                // Optionally cleanup chunks
+                // cleanupChunks(chunks); // Comentado para depuración
+            } else {
+                logger.error("Failed to merge chunks for session " + sessionId + " using both methods");
+            }
+        } catch (Exception e) {
+            logger.error("Error in mergeChunks: " + e.getMessage(), e);
         }
+    }
+    
+    /**
+     * Intenta fusionar chunks de audio usando FFmpeg
+     * @param chunks Lista de chunks de audio a fusionar
+     * @param outputPath Ruta donde se guardará el archivo final
+     * @return true si la fusión fue exitosa, false en caso contrario
+     */
+    private boolean mergeWithFFmpeg(List<Audio> chunks, Path outputPath) throws IOException {
+        logger.info("Attempting to merge with FFmpeg");
+        
+        // Asegurar que los chunks estén ordenados por índice
+        chunks.sort((a, b) -> a.getChunkIndex().compareTo(b.getChunkIndex()));
+        
+        // Crear un archivo temporal con la lista de chunks para FFmpeg
+        Path chunkListFile = Files.createTempFile("chunks_", ".txt");
+        
+        try {
+            // Escribir la lista de archivos en el formato que FFmpeg espera
+            List<String> lines = chunks.stream()
+                .map(chunk -> "file '" + chunk.getPath().replace("\\", "/") + "'")
+                .collect(Collectors.toList());
+            
+            Files.write(chunkListFile, lines);
+            
+            logger.info("Created chunk list file at: " + chunkListFile);
+            
+            // Construir comando FFmpeg
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                "ffmpeg",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", chunkListFile.toString(),
+                "-c", "copy",
+                outputPath.toString()
+            );
+            
+            // Ejecutar el proceso
+            Process process = processBuilder.start();
+            int exitCode = process.waitFor();
+            
+            // Capturar salida estándar y de error
+            String output = new String(process.getInputStream().readAllBytes());
+            String error = new String(process.getErrorStream().readAllBytes());
+            
+            if (exitCode == 0) {
+                logger.info("FFmpeg merge successful");
+                return true;
+            } else {
+                logger.warn("FFmpeg failed with exit code " + exitCode);
+                logger.warn("FFmpeg output: " + output);
+                logger.warn("FFmpeg error: " + error);
+                return false;
+            }
+        } catch (InterruptedException e) {
+            logger.error("FFmpeg process was interrupted", e);
+            Thread.currentThread().interrupt();
+            return false;
+        } finally {
+            // Limpiar archivo temporal
+            try {
+                Files.deleteIfExists(chunkListFile);
+            } catch (IOException e) {
+                logger.warn("Could not delete temporary file: " + chunkListFile, e);
+            }
+        }
+    }
+    
+    /**
+     * Fusiona chunks de audio usando concatenación simple
+     * Este método es un respaldo cuando FFmpeg no está disponible
+     * @param chunks Lista de chunks de audio a fusionar
+     * @param outputPath Ruta donde se guardará el archivo final
+     */
+    private void mergeWithSimpleConcatenation(List<Audio> chunks, Path outputPath) throws IOException {
+        logger.info("Using simple concatenation to merge audio chunks - total chunks: " + chunks.size());
+        
+        // Asegurar que los chunks estén ordenados por índice
+        chunks.sort((a, b) -> a.getChunkIndex().compareTo(b.getChunkIndex()));
+        
+        try (var outputStream = Files.newOutputStream(outputPath)) {
+            // Con el nuevo enfoque, simplemente concatenamos todos los chunks en orden
+            // ya que provienen de una única grabación continua
+            for (Audio chunk : chunks) {
+                Path chunkPath = Paths.get(chunk.getPath());
+                if (!Files.exists(chunkPath)) {
+                    logger.warn("Chunk file does not exist: " + chunkPath);
+                    continue;
+                }
+                
+                byte[] chunkData = Files.readAllBytes(chunkPath);
+                logger.info("Processing chunk #" + chunk.getChunkIndex() + ", size: " + chunkData.length + " bytes");
+                
+                // Escribir los datos del chunk directamente
+                outputStream.write(chunkData);
+                logger.info("Wrote chunk data: " + chunk.getPath() + ", size: " + chunkData.length + " bytes");
+            }
+        }
+        
+        logger.info("Completed simple concatenation of audio chunks to: " + outputPath);
     }
     
     private void cleanupChunks(List<Audio> chunks) {

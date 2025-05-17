@@ -105,9 +105,9 @@ const AudioRecorder: FC<AudioRecorderProps> = ({ sessionId, onRecordingComplete 
     };
   }, [isRecording]);
   
-  // Función para iniciar una nueva instancia de grabación
-  // Esto asegura que cada chunk tenga encabezados WebM completos
-  const startNewRecorder = async (): Promise<void> => {
+  // Función para iniciar la grabación de audio
+  // Ahora usamos una única instancia de MediaRecorder para toda la sesión
+  const startRecorderSession = async (): Promise<void> => {
     try {
       // Detener cualquier stream anterior
       if (streamRef.current) {
@@ -136,13 +136,14 @@ const AudioRecorder: FC<AudioRecorderProps> = ({ sessionId, onRecordingComplete 
       });
       
       // Reiniciar el arreglo de chunks para esta nueva grabación
-      // Esto es crítico para que cada chunk tenga sus propios datos independientes
       audioChunksRef.current = [];
       console.log('Array de chunks reiniciado para nueva grabación');
       
       // Configurar handler para capturar datos
+      // Este evento se dispara cuando hay nuevos datos disponibles o cuando se llama a requestData()
       mediaRecorderRef.current.ondataavailable = (event: BlobEvent) => {
         if (event.data.size > 0) {
+          // Guardar los datos en el array de chunks actual
           audioChunksRef.current.push(event.data);
           console.log(`Datos de audio disponibles: ${event.data.size} bytes, total chunks: ${audioChunksRef.current.length}`);
         } else {
@@ -150,66 +151,31 @@ const AudioRecorder: FC<AudioRecorderProps> = ({ sessionId, onRecordingComplete 
         }
       };
       
-      // Configurar handler para cuando se detenga la grabación
+      // Configurar handler para cuando se detenga la grabación completa
+      // Este evento solo se dispara cuando se detiene manualmente la grabación
       mediaRecorderRef.current.onstop = async () => {
-        // Determinar si estamos en proceso de chunking o si es una detención manual
-        const isChunking = isChunkingRef.current;
-        // Si estamos en proceso de chunking, forzar el estado de grabación a true
-        // para asegurar que se continue con el siguiente chunk
-        const shouldContinueRecording = isChunking ? true : isRecording;
+        console.log(`EVENTO ONSTOP: Grabación completa detenida`);
         
-        console.log(`EVENTO ONSTOP: Grabación detenida para chunk ${currentChunkIndexRef.current}, isRecording=${isRecording}, isChunking=${isChunking}, shouldContinueRecording=${shouldContinueRecording}`);
-        
-        // Esperar un poco para asegurar que todos los datos fueron recogidos
-        console.log(`Esperando para asegurar que todos los datos fueron recogidos...`);
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        console.log(`Chunks de audio acumulados: ${audioChunksRef.current.length}`);
+        // Procesar y enviar el último chunk si hay datos pendientes
         if (audioChunksRef.current.length > 0) {
-          // Crear blob con todos los chunks acumulados
-          // Importante: Cada blob tendrá sus propios encabezados WebM completos
-          // porque estamos creando una nueva instancia de MediaRecorder para cada chunk
+          // Crear blob con los datos acumulados
           const audioBlob = new Blob(audioChunksRef.current, { 
             type: mediaRecorderRef.current?.mimeType || "audio/webm" 
           });
           
-          console.log(`Chunk ${currentChunkIndexRef.current} listo: ${audioBlob.size} bytes, tipo: ${audioBlob.type}`);
+          console.log(`Último chunk listo: ${audioBlob.size} bytes, tipo: ${audioBlob.type}`);
           
-          // Verificar que este chunk no se haya subido ya
-          if (!uploadedChunksRef.current.has(currentChunkIndexRef.current)) {
-            console.log(`Subiendo chunk #${currentChunkIndexRef.current} (no subido previamente)`);
-            // Subir el chunk
-            await uploadChunk(audioBlob, currentChunkDuration, currentChunkIndexRef.current);
-          } else {
-            console.log(`Chunk #${currentChunkIndexRef.current} ya fue subido anteriormente, omitiendo`);
-          }
-          
-          // Continuar grabando si estamos en proceso de chunking o si la grabación sigue activa
-          if (shouldContinueRecording) {
-            console.log(`Continuando grabación, incrementando índice de chunk a ${currentChunkIndexRef.current + 1}`);
-            currentChunkIndexRef.current++;
-            setCurrentChunkDuration(0);
-            
-            // Iniciar nueva instancia de grabación para el siguiente chunk
-            console.log(`Iniciando nueva instancia de grabación para chunk #${currentChunkIndexRef.current}`);
-            await startNewRecorder();
-            // Desmarcar el proceso de chunking una vez que se ha iniciado la nueva grabación
-            isChunkingRef.current = false;
-          } else {
-            console.log(`Grabación detenida, no se iniciará un nuevo chunk`);
-          }
-        } else {
-          console.warn(`No hay datos de audio acumulados para el chunk ${currentChunkIndexRef.current}`);
+          // Subir el último chunk marcado como último
+          await uploadChunk(audioBlob, currentChunkDuration, currentChunkIndexRef.current, true);
         }
+        
+        console.log(`Grabación detenida completamente`);
       };
       
-      // Limpiar el array de chunks de audio antes de iniciar la grabación
-      audioChunksRef.current = [];
-      
-      // Iniciar la grabación con un timeslice para obtener datos periódicamente
-      // Un valor más pequeño asegura que se generen eventos ondataavailable más frecuentemente
-      mediaRecorderRef.current.start(500); // Generar datos cada 500ms
-      console.log(`Nueva grabación iniciada para chunk ${currentChunkIndexRef.current}`);
+      // Iniciar la grabación continua
+      // Usamos un timeslice pequeño para generar eventos ondataavailable frecuentemente
+      mediaRecorderRef.current.start(1000); // Generar datos cada segundo
+      console.log(`Grabación continua iniciada`);
       
     } catch (error) {
       console.error("Error al iniciar grabación:", error);
@@ -223,11 +189,7 @@ const AudioRecorder: FC<AudioRecorderProps> = ({ sessionId, onRecordingComplete 
     }
   };
   
-  // Variable para rastrear si estamos en medio de un proceso de chunking
-  // Esto evita que el estado isRecording se cambie durante el proceso
-  const isChunkingRef = useRef<boolean>(false);
-  
-  // Función para manejar la finalización de un chunk
+  // Función para manejar la finalización de un chunk de duración
   const handleChunkComplete = async (): Promise<void> => {
     console.log(`ENTRANDO a handleChunkComplete, isRecording=${isRecording}, isChunkProcessing=${isChunkProcessingRef.current}`);
     
@@ -240,11 +202,10 @@ const AudioRecorder: FC<AudioRecorderProps> = ({ sessionId, onRecordingComplete 
     try {
       console.log(`INICIANDO procesamiento de chunk #${currentChunkIndexRef.current}`);
       isChunkProcessingRef.current = true;
-      isChunkingRef.current = true; // Marcar que estamos en proceso de chunking
       
       // Verificar si el MediaRecorder está activo y grabando
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-        console.log(`Completando chunk ${currentChunkIndexRef.current}... Estado del MediaRecorder: ${mediaRecorderRef.current.state}`);
+        console.log(`Procesando chunk ${currentChunkIndexRef.current}... Estado del MediaRecorder: ${mediaRecorderRef.current.state}`);
         
         // Solicitar los datos acumulados hasta ahora
         console.log(`Solicitando datos acumulados para chunk #${currentChunkIndexRef.current}`);
@@ -254,32 +215,37 @@ const AudioRecorder: FC<AudioRecorderProps> = ({ sessionId, onRecordingComplete 
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // Verificar nuevamente el estado de grabación después de la espera
-        // Esto es crucial para evitar detener el MediaRecorder si el usuario ha detenido la grabación manualmente
         if (!isRecording) {
           console.warn(`La grabación se detuvo durante el procesamiento del chunk ${currentChunkIndexRef.current}`);
           isChunkProcessingRef.current = false;
-          isChunkingRef.current = false; // Desmarcar proceso de chunking
           return;
         }
         
-        // Verificar nuevamente que el MediaRecorder sigue en estado de grabación
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-          // Detener la grabación para forzar el evento onstop
-          console.log(`Deteniendo MediaRecorder para chunk #${currentChunkIndexRef.current}`);
-          mediaRecorderRef.current.stop();
-          console.log(`MediaRecorder detenido para chunk #${currentChunkIndexRef.current}`);
-          // El evento onstop se encargará de iniciar la siguiente grabación
-        } else {
-          console.warn(`MediaRecorder ya no está grabando, no se detuvo: ${mediaRecorderRef.current?.state || 'null'}`);
-          isChunkingRef.current = false; // Desmarcar proceso de chunking
+        // Procesar y enviar el chunk actual
+        if (audioChunksRef.current.length > 0) {
+          // Crear blob con los datos acumulados
+          const audioBlob = new Blob(audioChunksRef.current, { 
+            type: mediaRecorderRef.current?.mimeType || "audio/webm" 
+          });
+          
+          console.log(`Chunk ${currentChunkIndexRef.current} listo: ${audioBlob.size} bytes, tipo: ${audioBlob.type}`);
+          
+          // Subir el chunk (no es el último chunk)
+          await uploadChunk(audioBlob, currentChunkDuration, currentChunkIndexRef.current, false);
+          
+          // Incrementar el índice del chunk y reiniciar la duración
+          currentChunkIndexRef.current++;
+          setCurrentChunkDuration(0);
+          
+          // Limpiar el array de chunks para el próximo chunk
+          // Importante: NO reiniciamos el MediaRecorder, seguimos usando la misma instancia
+          audioChunksRef.current = [];
         }
       } else {
-        console.warn(`No se pudo completar chunk ${currentChunkIndexRef.current}: MediaRecorder no está grabando o es null`);
-        isChunkingRef.current = false; // Desmarcar proceso de chunking
+        console.warn(`No se pudo procesar chunk ${currentChunkIndexRef.current}: MediaRecorder no está grabando o es null`);
       }
     } catch (error) {
       console.error(`ERROR al procesar chunk #${currentChunkIndexRef.current}:`, error);
-      isChunkingRef.current = false; // Desmarcar proceso de chunking en caso de error
     } finally {
       console.log(`Finalizando procesamiento de chunk #${currentChunkIndexRef.current}`);
       isChunkProcessingRef.current = false;
@@ -287,14 +253,8 @@ const AudioRecorder: FC<AudioRecorderProps> = ({ sessionId, onRecordingComplete 
   };
   
   // Función para subir un chunk de audio al servidor
-  const uploadChunk = async (blob: Blob, duration: number, chunkIndex: number): Promise<void> => {
-    // Determinar si estamos en proceso de chunking o si es una detención manual
-    const isChunking = isChunkingRef.current;
-    // Capturar el estado actual de grabación para determinar si es el último chunk
-    const currentRecordingState = isChunking ? true : isRecording;
-    // Solo consideramos que es el último chunk si explícitamente se ha detenido la grabación
-    // y no estamos en proceso de chunking
-    const isLastChunk = !currentRecordingState && !isChunking && currentChunkIndexRef.current === chunkIndex;
+  const uploadChunk = async (blob: Blob, duration: number, chunkIndex: number, isLastChunk: boolean): Promise<void> => {
+    // El parámetro isLastChunk ahora se pasa explícitamente
     
     try {
       setIsUploading(true);
@@ -391,9 +351,9 @@ const AudioRecorder: FC<AudioRecorderProps> = ({ sessionId, onRecordingComplete 
       setIsRecording(true);
       console.log('Estado de grabación establecido a TRUE');
       
-      // Iniciar nueva grabación
-      console.log('Llamando a startNewRecorder para iniciar la grabación');
-      await startNewRecorder();
+      // Iniciar nueva grabación continua
+      console.log('Iniciando sesión de grabación continua');
+      await startRecorderSession();
       console.log('Grabación iniciada correctamente');
     } catch (error) {
       console.error("ERROR AL INICIAR GRABACIÓN:", error);
@@ -427,28 +387,35 @@ const AudioRecorder: FC<AudioRecorderProps> = ({ sessionId, onRecordingComplete 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
       console.log('Solicitando últimos datos antes de detener grabación');
       mediaRecorderRef.current.requestData();
-    }
-    
-    // Establecer estado de grabación a false
-    console.log('Estableciendo isRecording = false');
-    setIsRecording(false);
-    
-    // Detener la grabación actual
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-      console.log('Deteniendo MediaRecorder');
-      mediaRecorderRef.current.stop();
+      
+      // Esperar un momento para que los datos se procesen
+      setTimeout(() => {
+        // Establecer estado de grabación a false
+        console.log('Estableciendo isRecording = false');
+        setIsRecording(false);
+        
+        // Detener la grabación actual
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+          console.log('Deteniendo MediaRecorder');
+          mediaRecorderRef.current.stop();
+        } else {
+          console.log(`No se detuvo MediaRecorder: ${mediaRecorderRef.current ? mediaRecorderRef.current.state : 'null'}`);
+        }
+        
+        // Detener el stream de audio
+        if (streamRef.current) {
+          console.log('Deteniendo stream de audio');
+          streamRef.current.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+          streamRef.current = null;
+        }
+        
+        console.log('Grabación detenida completamente');
+      }, 500); // Esperar 500ms para asegurar que los datos se hayan procesado
     } else {
-      console.log(`No se detuvo MediaRecorder: ${mediaRecorderRef.current ? mediaRecorderRef.current.state : 'null'}`);
+      // Si no hay grabación activa, simplemente actualizar el estado
+      setIsRecording(false);
+      console.log('No hay grabación activa para detener');
     }
-    
-    // Detener el stream de audio
-    if (streamRef.current) {
-      console.log('Deteniendo stream de audio');
-      streamRef.current.getTracks().forEach((track: MediaStreamTrack) => track.stop());
-      streamRef.current = null;
-    }
-    
-    console.log('Grabación detenida completamente');
   };
   
   // Formatear tiempo en MM:SS
