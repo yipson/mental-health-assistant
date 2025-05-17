@@ -10,10 +10,10 @@ import { mockApi } from "./mockApi";
 import axiosInstance from "./axiosConfig";
 import authService from "./authService";
 
-// Set to false to use real API
+// Flag to use mock API for development
 const USE_MOCK_API = false;
 
-// Sessions API
+// Session API
 export const sessionsApi = {
   getAllSessions: async (): Promise<ApiResponse<Session[]>> => {
     try {
@@ -24,8 +24,10 @@ export const sessionsApi = {
 
       // Real API implementation
       const response = await axiosInstance.get("/sessions");
-      const sessions = response.data.map(mapSessionFromBackend);
-      return { data: sessions, success: true };
+      return {
+        data: response.data.map(mapSessionFromBackend),
+        success: true,
+      };
     } catch (error: any) {
       return {
         error: error.response?.data?.message || error.message,
@@ -245,7 +247,7 @@ export const audioApi = {
       formData.append("chunkIndex", metadata.chunkNumber.toString());
       formData.append("isLastChunk", metadata.isLastChunk.toString());
 
-      const response = await axiosInstance.post("/audio/upload-chunk", formData, {
+      const response = await axiosInstance.post("/api/audio/upload-chunk", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },

@@ -40,17 +40,20 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({ session }) => {
       recordingUrl,
       status: SessionStatus.IN_PROGRESS 
     });
-    
-    // Move to transcription tab
-    setActiveTab(1);
+
+
+
   };
 
+  // TODO: add logic to transcript
+  /**
   const handleTranscriptionComplete = (transcriptionId: string) => {
     updateSession(session.id, { 
       transcriptionId,
       status: SessionStatus.IN_PROGRESS 
     });
   };
+ */
 
   const handleRequestSummary = async () => {
     if (!session.transcriptionId) {
@@ -66,20 +69,20 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({ session }) => {
 
     try {
       startSummarizing();
-      
+
       const response = await summaryApi.createSummary(session.transcriptionId);
-      
+
       if (response.success && response.data) {
         setSummary(response.data.text);
-        
+
         updateSession(session.id, { 
           summaryId: response.data.id,
           status: SessionStatus.COMPLETED
         });
-        
+
         // Move to summary tab
         setActiveTab(2);
-        
+
         toast({
           title: 'Summary generated',
           status: 'success',
@@ -141,23 +144,23 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({ session }) => {
             <Tab>Transcription</Tab>
             <Tab>AI Summary</Tab>
           </TabList>
-          
+
           <TabPanels>
             <TabPanel p={4}>
               <AudioRecorder 
                 sessionId={session.id} 
                 onRecordingComplete={handleRecordingComplete}
-                onTranscriptionComplete={handleTranscriptionComplete}
+                //onTranscriptionComplete={handleTranscriptionComplete}
               />
             </TabPanel>
-            
+
             <TabPanel p={4}>
               <TranscriptionDisplay 
                 sessionId={session.id}
                 onRequestSummary={handleRequestSummary}
               />
             </TabPanel>
-            
+
             <TabPanel p={4}>
               <SummaryDisplay sessionId={session.id} />
             </TabPanel>
