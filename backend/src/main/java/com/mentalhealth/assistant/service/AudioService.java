@@ -128,8 +128,8 @@ public class AudioService {
                 
                 audioRepository.save(finalAudio);
                 
-                // Optionally cleanup chunks
-                // cleanupChunks(chunks); // Comentado para depuración
+
+                cleanupChunks(chunks); // Comentado para depuración
             } else {
                 logger.error("Failed to merge chunks for session " + sessionId + " using both methods");
             }
