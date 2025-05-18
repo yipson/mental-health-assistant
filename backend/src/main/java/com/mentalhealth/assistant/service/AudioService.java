@@ -33,6 +33,9 @@ public class AudioService {
     @Autowired
     private SessionRepository sessionRepository;
     
+    @Autowired
+    private S3Service s3Service;
+    
     @Value("${app.audio.upload.dir}")
     private String uploadDir;
     
@@ -126,10 +129,22 @@ public class AudioService {
                 finalAudio.setLastChunk(true);
                 finalAudio.setSession(chunks.get(0).getSession());
                 
+                // Subir el archivo a S3 si el servicio está disponible
+                try {
+                    if (s3Service != null) {
+                        String s3Key = "audio/" + sessionId + "/" + finalFilename;
+                        String s3Url = s3Service.uploadFile(finalPath, s3Key);
+                        finalAudio.setS3Url(s3Url);
+                        logger.info("Uploaded merged audio file to S3: " + s3Url);
+                    }
+                } catch (Exception e) {
+                    logger.error("Failed to upload audio to S3: " + e.getMessage(), e);
+                    // No lanzamos excepción para que el proceso continúe aunque falle S3
+                }
+                
                 audioRepository.save(finalAudio);
                 
-                // Optionally cleanup chunks
-                // cleanupChunks(chunks); // Comentado para depuración
+                cleanupChunks(chunks);
             } else {
                 logger.error("Failed to merge chunks for session " + sessionId + " using both methods");
             }

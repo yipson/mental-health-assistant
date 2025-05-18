@@ -25,6 +25,8 @@ public class Audio {
     
     private boolean isLastChunk;
     
+    private String s3Url;
+    
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "session_id")
     private Session session;
