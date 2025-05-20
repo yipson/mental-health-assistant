@@ -34,15 +34,43 @@ public class S3Config {
      */
     @Bean
     public AmazonS3 amazonS3Client() {
-        AWSCredentials credentials = new BasicAWSCredentials(accessKey, secretKey);
-        
-        return AmazonS3ClientBuilder
-                .standard()
-                .withCredentials(new AWSStaticCredentialsProvider(credentials))
-                .withRegion(Regions.fromName(region))
-                .build();
+        System.out.println("S3CONFIG DEBUG - Initializing S3 client with:");
+        System.out.println("S3CONFIG DEBUG - Region: " + region);
+        System.out.println("S3CONFIG DEBUG - Bucket: " + bucketName);
+        System.out.println("S3CONFIG DEBUG - Access Key ID: " + accessKey.substring(0, 5) + "...");
+        System.out.println("S3CONFIG DEBUG - Secret Key: " + (secretKey != null ? "[PROVIDED]" : "[NULL]"));
+
+        try {
+            AWSCredentials credentials = new BasicAWSCredentials(accessKey, secretKey);
+            
+            AmazonS3 client = AmazonS3ClientBuilder
+                    .standard()
+                    .withCredentials(new AWSStaticCredentialsProvider(credentials))
+                    .withRegion(Regions.fromName(region))
+                    .build();
+            
+            System.out.println("S3CONFIG DEBUG - S3 client successfully created");
+            
+            // Test if we can access the S3 service
+            try {
+                boolean bucketExists = client.doesBucketExistV2(bucketName);
+                System.out.println("S3CONFIG DEBUG - Bucket '" + bucketName + "' exists: " + bucketExists);
+                if (!bucketExists) {
+                    System.out.println("S3CONFIG WARNING - Bucket '" + bucketName + "' does not exist!");
+                }
+            } catch (Exception e) {
+                System.out.println("S3CONFIG ERROR - Failed to check bucket existence: " + e.getMessage());
+            }
+            
+            return client;
+        } catch (Exception e) {
+            System.out.println("S3CONFIG ERROR - Failed to create S3 client: " + e.getMessage());
+            e.printStackTrace();
+            // Return null to indicate failure - this will be caught in the S3Service
+            return null;
+        }
     }
-    
+
     /**
      * @return Nombre del bucket S3 configurado
      */

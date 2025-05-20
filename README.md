@@ -23,61 +23,85 @@ A modern web application designed to assist mental health professionals in manag
 - Tailwind CSS for styling
 
 ### Backend (API)
-- Node.js with Express
-- MongoDB for database
-- Socket.IO for real-time communication
-- AI integration for transcription and summarization
+- Spring Boot (Java 17)
+- JPA for ORM
+- Spring Security with JWT
+- AWS S3 for audio storage
+- RESTful API architecture
 
-## 🚀 Getting Started
+## 🐳 Docker Deployment
+
+### Prerequisites
+- Docker installed on your system
+- Docker Compose installed on your system
+
+### Setup and Deployment
+
+1. Clone the repository
+   ```bash
+   git clone https://github.com/yipson/mental-health-assistant.git
+   cd mental-health-assistant
+   ```
+
+2. Create a `.env` file in the root directory with the following variables:
+   ```
+   AWS_ACCESS_KEY=your_aws_access_key
+   AWS_SECRET_KEY=your_aws_secret_key
+   AWS_S3_REGION=your_aws_region
+   AWS_S3_BUCKET=your_aws_bucket_name
+   SPRING_PROFILES_ACTIVE=prod
+   ```
+
+3. Build and start the containers
+   ```bash
+   docker-compose up -d --build
+   ```
+
+4. Access the application
+   - Frontend: http://localhost
+   - Backend API: http://localhost:8080
+   - API Documentation: http://localhost:8080/swagger-ui.html
+
+### Managing Docker Containers
+
+- View container status: `docker-compose ps`
+- View logs: `docker-compose logs` or `docker-compose logs -f` for following logs
+- Stop containers: `docker-compose down`
+
+## 🚀 Development Setup
 
 ### Prerequisites
 - Node.js (v16 or higher)
 - npm or yarn
-- MongoDB (local or Atlas)
+- JDK 17
+- Gradle
 
-### Installation
+### Frontend Installation
 
-1. Clone the repository
-   ```bash
-   git clone https://github.com/yourusername/mental-health-assistant.git
-   cd mental-health-assistant
-   ```
-
-2. Install dependencies for frontend
+1. Install dependencies for frontend
    ```bash
    cd frontend
    npm install
    ```
 
-3. Install dependencies for backend
+2. Start the development server
    ```bash
-   cd ../backend
-   npm install
-   ```
-
-4. Create a `.env` file in the backend directory with the following variables:
-   ```
-   PORT=5000
-   MONGODB_URI=mongodb://localhost:27017/mental-health-assistant
-   JWT_SECRET=your_jwt_secret
-   AI_API_KEY=your_ai_api_key
-   ```
-
-5. Start the development servers
-
-   Backend:
-   ```bash
-   cd backend
-   npm run dev
-   ```
-
-   Frontend:
-   ```bash
-   cd frontend
    npm start
    ```
 
-6. Open your browser and navigate to `http://localhost:3000`
+3. Open your browser and navigate to `http://localhost:3000`
+
+### Backend Installation
+
+1. Configure AWS credentials in `backend/src/main/resources/application.properties`
+
+2. Start the Spring Boot application
+   ```bash
+   cd backend
+   ./gradlew bootRun
+   ```
+
+3. The backend API will be available at `http://localhost:8080`
 
 ## 📱 Application Structure
 
