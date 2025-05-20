@@ -176,19 +176,34 @@ const SessionForm: React.FC<SessionFormProps> = ({
               control={control}
               name="date"
               rules={{ required: 'Date is required' }}
-              render={({ field }) => (
-                <DatePicker
-                  id="date"
-                  selected={field.value}
-                  onChange={(date: Date | null) => field.onChange(date || new Date())}
-                  showTimeSelect
-                  timeFormat="HH:mm"
-                  timeIntervals={15}
-                  dateFormat="MMMM d, yyyy h:mm aa"
-                  className="chakra-input css-1kp110w"
-                  wrapperClassName="w-full"
-                />
-              )}
+              render={({ field }) => {
+                // Adjust displayed date to show correct time
+                const displayDate = field.value ? new Date(field.value) : null;
+                
+                return (
+                  <DatePicker
+                    id="date"
+                    selected={displayDate}
+                    onChange={(date: Date | null) => {
+                      if (date) {
+                        // Adjust for timezone difference (5 hours)
+                        // Create a new date with the same local time values
+                        const adjustedDate = new Date(date);
+                        // No need to adjust hours - keep the time exactly as selected
+                        field.onChange(adjustedDate);
+                      } else {
+                        field.onChange(new Date());
+                      }
+                    }}
+                    showTimeSelect
+                    timeFormat="HH:mm"
+                    timeIntervals={15}
+                    dateFormat="MMMM d, yyyy h:mm aa"
+                    className="chakra-input css-1kp110w"
+                    wrapperClassName="w-full"
+                  />
+                );
+              }}
             />
             <FormFieldError error={errors.date} />
           </FormControl>

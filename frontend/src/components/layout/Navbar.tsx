@@ -14,8 +14,17 @@ import {
   DrawerContent,
   DrawerCloseButton,
   VStack,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  Avatar,
+  Text,
+  Divider,
+  useToast
 } from '@chakra-ui/react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import useAuthStore from '../../store/authStore';
 import { HamburgerIcon, CloseIcon } from '@chakra-ui/icons';
 
 // Define navigation items
@@ -79,6 +88,27 @@ const Logo: React.FC = () => (
 const Navbar: React.FC = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const bgColor = useColorModeValue('white', 'gray.800');
+  const navigate = useNavigate();
+  const toast = useToast();
+  
+  // Get auth store
+  const { user: currentUser, logout } = useAuthStore();
+  
+  // Handle logout
+  const handleLogout = () => {
+    // Use the store's logout function which updates state AND clears localStorage
+    logout();
+    
+    toast({
+      title: 'Logged out successfully',
+      status: 'success',
+      duration: 3000,
+      isClosable: true,
+    });
+    
+    // Force navigation to login page
+    navigate('/login', { replace: true });
+  };
   
   return (
     <Box as="nav" bg={bgColor} boxShadow="sm" position="sticky" top={0} zIndex={10}>
@@ -97,6 +127,49 @@ const Navbar: React.FC = () => {
           {NAV_ITEMS.map((item) => (
             <NavLink key={item.label} item={item} />
           ))}
+          
+          {/* User Menu with Logout */}
+          {currentUser && (
+            <Menu>
+              <MenuButton
+                as={Button}
+                rounded={'full'}
+                variant={'link'}
+                cursor={'pointer'}
+                minW={0}
+              >
+                <HStack>
+                  <Avatar
+                    size={'sm'}
+                    name={currentUser.username}
+                    bg="brand.500"
+                    color="white"
+                  />
+                  <Text display={{ base: 'none', md: 'flex' }}>
+                    {currentUser.username}
+                  </Text>
+                </HStack>
+              </MenuButton>
+              <MenuList>
+                <MenuItem as={Link} to="/profile">Profile</MenuItem>
+                <MenuItem as={Link} to="/settings">Settings</MenuItem>
+                <Divider />
+                <MenuItem onClick={handleLogout}>Logout</MenuItem>
+              </MenuList>
+            </Menu>
+          )}
+          
+          {/* Login button if not logged in */}
+          {!currentUser && (
+            <Button
+              as={Link}
+              to="/login"
+              colorScheme="brand"
+              variant="solid"
+            >
+              Login
+            </Button>
+          )}
         </HStack>
 
         {/* Mobile Navigation Button */}
@@ -125,6 +198,35 @@ const Navbar: React.FC = () => {
                   onClick={onClose}
                 />
               ))}
+              
+              {/* Mobile Logout Button */}
+              {currentUser && (
+                <>
+                  <Divider />
+                  <Button
+                    colorScheme="brand"
+                    variant="outline"
+                    onClick={() => {
+                      onClose();
+                      handleLogout();
+                    }}
+                  >
+                    Logout
+                  </Button>
+                </>
+              )}
+              
+              {/* Mobile Login Button */}
+              {!currentUser && (
+                <Button
+                  as={Link}
+                  to="/login"
+                  colorScheme="brand"
+                  onClick={onClose}
+                >
+                  Login
+                </Button>
+              )}
             </VStack>
           </DrawerBody>
         </DrawerContent>
